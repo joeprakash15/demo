@@ -1,0 +1,133 @@
+#This document will install kubeadm custer on one Master node and one Worker node. 
+
+#here we are using ubuntu server version: 20, instance type: t2.medium (2vcpu and 4 ram).
+
+#For jenkins server we can use t2.large in that we will install jenkins server and sonarqube as docker container.    
+
+
+
+
+Jenkins server:
+
+	1. kubectl need to install in this jenkins server.
+		#sudo apt update 
+		#sudo apt install curl
+		#curl -LO https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl
+		#sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+		#kubectl version --client
+
+NEXT --> now we need to change hostname of the master and worker node separately:
+master node:
+	1.do following commands 
+		#sudo su
+		#hostname master
+		#bash
+
+Worker node: do the same on worker as well. 
+		#sudo su
+		#hostname worker
+		#bash
+
+NEXT ---> do some config on both master and worker.  
+	  
+Master node and Worker node:
+
+	1. update and upgrade both ---> #sudo apt-get update && sudo apt-get upgrade -y
+	
+	2. Installing docker on both --> #sudo apt-get install -y docker.io
+
+	3. adding user modification --> #sudo usermod -aG docker ubuntu
+					#newgrp docker
+					#sudo chmod 777 /var/run/docker.sock
+	
+
+	4. Adding k8s public keys on both (this is for version ubuntu:20) 
+			-->#sudo curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+	5. Adding binaries for the keys --> #sudo tee /etc/apt/sources.list.d/kubernetes.list <<EOF
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+	6. update and install kubelet, kubeadm, kubectl -->#sudo apt update && sudo apt-get install -y kubelet kubeadm kubectl
+	7. install kube-apiserver --> #sudo snap install kube-apiserver
+
+NEXT --->
+
+Master Node: (only)
+
+	1. Initializing the kubeadm --> #sudo kubeadm init --pod-network-cidr=10.244.0.0/16
+		output would be like: 
+			#[init] Using Kubernetes version: v1.28.2
+			#[mark-control-plane] Marking the node ip-172-31-12-164 as control-plane by adding the labels: [node-role.kubernetes.io/control-plane node.kubernetes.io/exclude-from-external-load-balancers]
+			#Your Kubernetes control-plane has initialized successfully!
+
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+Alternatively, if you are the root user, you can run:
+
+  export KUBECONFIG=/etc/kubernetes/admin.conf
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+Then you can join any number of worker nodes by running the following on each as root:
+
+kubeadm join 172.31.12.164:6443 --token 11lhoo.o6h3w73j5gernfwr \
+        --discovery-token-ca-cert-hash sha256:d6196f70a6b145f8e7ab4ed3cc1e210fdad1d7527ff55c8e7c42511367c37310
+
+
+NEXT ---> SAME Master node:
+	1. (root@ip-172-31-12-164) from exit two times, now you are as ubuntu user (ubuntu@ip-172-31-12-164) and do all the above commands.
+		#mkdir -p $HOME/.kube
+		#sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+		#sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+NEXT --> copy that kubeadm join commands and paste it to worker node as Root user: (dont change anything user mod)
+Worker node:
+	1. kubeadm join with worker node -->#kubeadm join 172.31.12.164:6443 --token 11lhoo.o6h3w73j5gernfwr \
+        --discovery-token-ca-cert-hash sha256:d6196f70a6b145f8e7ab4ed3cc1e210fdad1d7527ff55c8e7c42511367c37310
+
+	2. Notes: Here if you need to give all trafic open or required port (172.31.12.164:6443) should open in the ec2 instance security group level, edit the inbound rule. Then only this worker node will connect with your master.
+
+
+NEXT --> we need to check get nodes in master node, it will give you not ready state. for that we need to add network fannel. 
+Master node: (as a ubuntu user)
+
+	1. deploy a Kubernetes networking solution called Flannel in a Kubernetes cluster --> #kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+	2. #kubectl get nodes --> after 3mint it will come as a ready state.  
+
+	3. Get your kube config file in the path /.kube folder 
+		#ll
+		#cd /.kube
+		#cat confg
+
+	4. Just create a file name secret file in local and copy paste the all information of kube config. This is for integrating K8s with Jenkins server. 
+	5. Open Jenkins dashboard --> Download require plugins like kubernetes, kubernetes credentials, kubernetes client api, kubenetes cli 
+	6. Next adding creadentials for k8s --> global credential --> add kind as secretfile, ID as k8s, description as k8s. 
+	7. For pipeline, use pipeline syntax for creating the pipeline script for using secret file.
+
+
+	Ex: stage('K8s'){
+            steps{
+                script{
+                    withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s', namespace: '', restrictKubeConfigAccess: false, serverUrl: '') {
+                        sh 'kubectl apply -f deployment.yaml'
+                    }
+                }
+            }
+        } 
+
+	8. after that we can create deployment.yaml file and deploy containers as a pod and service as node port or load balancer. 
+
+
+
+
+ 
+
+
